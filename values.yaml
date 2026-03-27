@@ -1,0 +1,59 @@
+providers:
+  talos:
+    enabled: true
+
+datadog:
+  site: datadoghq.com
+  clusterName: repro
+  # Talos/QEMU nodes often lack reverse DNS; without this, system-probe's
+  # event_monitor fails before CWS kprobes run (masks the attach_recursive_mnt bug).
+  hostname: repro-talos-ci
+  apiKeyExistingSecret: dd-keys
+  appKeyExistingSecret: dd-keys
+  securityAgent:
+    runtime:
+      enabled: true
+    compliance:
+      enabled: false
+  logs:
+    enabled: false
+  apm:
+    socketEnabled: false
+  processAgent:
+    enabled: false
+  networkMonitoring:
+    enabled: false
+  # Ensures all agent containers see DD_HOSTNAME (system-probe otherwise asks the
+  # core agent over :5001 during startup; if that races, event_monitor fails early).
+  env:
+    - name: DD_HOSTNAME
+      value: repro-talos-ci
+
+agents:
+  tolerations:
+    - operator: Exists
+  volumes:
+    - name: tracefs
+      hostPath:
+        path: /sys/kernel/tracing
+  volumeMounts:
+    - name: tracefs
+      mountPath: /sys/kernel/tracing
+      readOnly: true
+  containers:
+    agent:
+      env:
+        - name: DD_HOSTNAME
+          value: repro-talos-ci
+    systemProbe:
+      env:
+        - name: DD_HOSTNAME
+          value: repro-talos-ci
+      securityContext:
+        privileged: true
+
+clusterAgent:
+  tolerations:
+    - operator: Exists
+  admissionController:
+    enabled: false
