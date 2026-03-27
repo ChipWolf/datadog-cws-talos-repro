@@ -1,0 +1,94 @@
+name: Reproduce CWS kprobe failure on Talos
+
+on:
+  workflow_dispatch:
+    inputs:
+      talos_version:
+        description: "Talos version"
+        default: "v1.12.5"
+      agent_version:
+        description: "Datadog Agent image tag"
+        default: "7.77.1"
+
+env:
+  TALOS_VERSION: ${{ inputs.talos_version || 'v1.12.5' }}
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bail if no KVM
+        run: test -e /dev/kvm
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils
+          curl -fsSL "https://github.com/siderolabs/talos/releases/download/$TALOS_VERSION/talosctl-linux-amd64" \
+            -o /usr/local/bin/talosctl && chmod +x /usr/local/bin/talosctl
+          curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+            -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Boot Talos cluster
+        timeout-minutes: 15
+        run: |
+          sudo --preserve-env=HOME talosctl cluster create \
+            --provisioner=qemu --controlplanes=1 --workers=0 \
+            --cpus=2 --memory=4096 --disk=10240 \
+            --wait-timeout=10m --talos-version="$TALOS_VERSION"
+          talosctl kubeconfig --force /tmp/kubeconfig --merge=false
+
+      - name: Deploy Datadog Agent with CWS
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          kubectl wait --for=condition=Ready nodes --all --timeout=300s
+          helm repo add datadog https://helm.datadoghq.com && helm repo update
+          kubectl create secret generic dd-keys \
+            --from-literal=api-key=0000000000000000000000000000dead \
+            --from-literal=app-key=0000000000000000000000000000dead
+          helm install datadog datadog/datadog \
+            --set providers.talos.enabled=true \
+            --set datadog.apiKeyExistingSecret=dd-keys \
+            --set datadog.appKeyExistingSecret=dd-keys \
+            --set datadog.site=datadoghq.com \
+            --set datadog.securityAgent.runtime.enabled=true \
+            --set datadog.securityAgent.compliance.enabled=false \
+            --set datadog.logs.enabled=false \
+            --set datadog.apm.socketEnabled=false \
+            --set datadog.processAgent.enabled=false \
+            --set datadog.networkMonitoring.enabled=false \
+            --set agents.containers.systemProbe.securityContext.privileged=true \
+            --wait --timeout=180s || true
+
+      - name: Capture failure
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          sleep 90
+          POD=$(kubectl get pods -l app.kubernetes.io/name=datadog -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+          [ -z "$POD" ] && { echo "No agent pod found"; exit 1; }
+
+          echo "--- system-probe ---"
+          kubectl logs "$POD" -c system-probe 2>&1 | tee /tmp/system-probe.log
+          echo "--- security-agent ---"
+          kubectl logs "$POD" -c security-agent 2>&1 | tee /tmp/security-agent.log
+
+          grep -q "attach_recursive_mnt.*not found" /tmp/system-probe.log \
+            && echo "REPRODUCED: kprobe symbol mismatch confirmed" \
+            || echo "NOT REPRODUCED: expected error not found"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: repro-logs
+          path: /tmp/*.log
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: sudo talosctl cluster destroy --name=talos-default 2>/dev/null || true

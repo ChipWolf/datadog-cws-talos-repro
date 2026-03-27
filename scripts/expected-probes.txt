@@ -1,0 +1,29 @@
+# Datadog Agent CWS mount probe targets
+# Source: pkg/security/ebpf/probes/mount.go (EBPFFuncName with hook_/rethook_ prefix stripped)
+# Source: pkg/security/ebpf/probes/event_types.go (selector type: AllOf, OneOf, or BestEffort)
+#
+# Format: <kernel_function_name> <selector_type>
+#
+# AllOf = mandatory, failure kills entire event_monitor module
+# OneOf = one of the group must succeed
+# BestEffort = optional, failure tolerated
+
+# Mount probes registered in event_types.go lines 250-258 (AllOf block -- ALL must attach)
+attach_recursive_mnt AllOf
+propagate_mnt AllOf
+security_sb_umount AllOf
+clone_mnt AllOf
+mnt_change_mountpoint AllOf
+cleanup_mnt AllOf
+
+# Mount probes in event_types.go lines 259-261 (BestEffort)
+alloc_vfsmnt BestEffort
+
+# Mount probes in event_types.go lines 269-274 (OneOf -- one must succeed)
+attach_mnt OneOf
+__attach_mnt OneOf
+make_visible OneOf
+mnt_set_mountpoint OneOf
+
+# Additional mount probes from mount.go (registered but selected via above)
+mnt_want_write AllOf
