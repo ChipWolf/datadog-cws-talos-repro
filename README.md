@@ -174,13 +174,15 @@ Add `MatchFuncName` to the probe definition in `mount.go`:
  				UID:          SecurityAgentUID,
  				EBPFFuncName: "hook_attach_recursive_mnt",
  			},
-+			MatchFuncName: "^attach_recursive_mnt(\\.isra\\.[0-9]+)?$",
++			MatchFuncName: "^attach_recursive_mnt(\\.isra\\.0)?$",
  		},
 ```
 
-This regex matches both `attach_recursive_mnt` (standard kernels) and
-`attach_recursive_mnt.isra.0` (Talos 1.12.5 / kernel 6.18.15), following the
-same pattern already established by the network team for `.constprop.0`.
+Same shape as the conntracker precedent: optional **literal** `.<suffix>.0`, not a
+broad digit class. This matches `attach_recursive_mnt` on stock kernels and
+`attach_recursive_mnt.isra.0` on Talos 1.12.5 / kernel 6.18.15 (the observed IPA-SRA
+artifact). If another toolchain ever emitted `.isra.1`, extend the pattern the same
+way the codebase would for a second known `constprop` variant.
 
 ## Workaround
 
@@ -204,8 +206,8 @@ enabled, and captures the failure logs:
 gh workflow run live-repro.yml
 ```
 
-Requires KVM on the runner. GitHub Actions `ubuntu-latest` has intermittent KVM
-support so the job is `continue-on-error: true`.
+Requires `/dev/kvm` on the runner; the workflow’s first step asserts it. GitHub
+Actions `ubuntu-latest` provides KVM when the runner is hardware-backed.
 
 ### Local: Static Symbol Analysis
 
