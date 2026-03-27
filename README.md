@@ -184,9 +184,14 @@ broad digit class. This matches `attach_recursive_mnt` on stock kernels and
 artifact). If another toolchain ever emitted `.isra.1`, extend the pattern the same
 way the codebase would for a second known `constprop` variant.
 
-## Workaround
+## Mitigation: disable CWS runtime
 
-Disable CWS runtime in Datadog Helm values (CSPM/compliance still works):
+This is not a fix for CWS on Talos: it **turns off** runtime security so
+system-probe never loads the failing `event_monitor` path. Logs and metrics behave;
+CWS **runtime** rules and detection are unavailable until the kprobe match is fixed
+upstream (or the kernel exposes the unsuffixed symbol again). CSPM/compliance can
+stay on:
+
 
 ```yaml
 datadog:
